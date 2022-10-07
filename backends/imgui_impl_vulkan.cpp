@@ -21,6 +21,17 @@
 
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
+//  2022-10-04: Vulkan: Added experimental ImGui_ImplVulkan_RemoveTexture() for api symetry. (#914, #5738).
+//  2022-01-20: Vulkan: Added support for ImTextureID as VkDescriptorSet. User need to call ImGui_ImplVulkan_AddTexture(). Building for 32-bit targets requires '#define ImTextureID ImU64'. (#914).
+//  2021-10-15: Vulkan: Call vkCmdSetScissor() at the end of render a full-viewport to reduce likehood of issues with people using VK_DYNAMIC_STATE_SCISSOR in their app without calling vkCmdSetScissor() explicitly every frame.
+//  2021-06-29: Reorganized backend to pull data from a single structure to facilitate usage with multiple-contexts (all g_XXXX access changed to bd->XXXX).
+//  2021-03-22: Vulkan: Fix mapped memory validation error when buffer sizes are not multiple of VkPhysicalDeviceLimits::nonCoherentAtomSize.
+//  2021-02-18: Vulkan: Change blending equation to preserve alpha in output buffer.
+//  2021-01-27: Vulkan: Added support for custom function load and IMGUI_IMPL_VULKAN_NO_PROTOTYPES by using ImGui_ImplVulkan_LoadFunctions().
+//  2020-11-11: Vulkan: Added support for specifying which subpass to reference during VkPipeline creation.
+//  2020-09-07: Vulkan: Added VkPipeline parameter to ImGui_ImplVulkan_RenderDrawData (default to one passed to ImGui_ImplVulkan_Init).
+//  2020-05-04: Vulkan: Fixed crash if initial frame has no vertices.
+//  2020-04-26: Vulkan: Fixed edge case where render callbacks wouldn't be called if the ImDrawData didn't have vertices.
 //  2019-08-01: Vulkan: Added support for specifying multisample count. Set ImGui_ImplVulkan_InitInfo::MSAASamples to one of the VkSampleCountFlagBits values to use, default is non-multisampled as before.
 //  2019-05-29: Vulkan: Added support for large mesh (64K+ vertices), enable ImGuiBackendFlags_RendererHasVtxOffset flag.
 //  2019-04-30: Vulkan: Added support for special ImDrawCallback_ResetRenderState callback to reset render state.
@@ -97,6 +108,81 @@ void ImGui_ImplVulkanH_DestroyFrameRenderBuffers(VkDevice device, ImGui_ImplVulk
 void ImGui_ImplVulkanH_DestroyWindowRenderBuffers(VkDevice device, ImGui_ImplVulkanH_WindowRenderBuffers* buffers, const VkAllocationCallbacks* allocator);
 void ImGui_ImplVulkanH_CreateWindowSwapChain(VkPhysicalDevice physical_device, VkDevice device, ImGui_ImplVulkanH_Window* wd, const VkAllocationCallbacks* allocator, int w, int h, uint32_t min_image_count);
 void ImGui_ImplVulkanH_CreateWindowCommandBuffers(VkPhysicalDevice physical_device, VkDevice device, ImGui_ImplVulkanH_Window* wd, uint32_t queue_family, const VkAllocationCallbacks* allocator);
+
+// Vulkan prototypes for use with custom loaders
+// (see description of IMGUI_IMPL_VULKAN_NO_PROTOTYPES in imgui_impl_vulkan.h
+#ifdef VK_NO_PROTOTYPES
+static bool g_FunctionsLoaded = false;
+#else
+static bool g_FunctionsLoaded = true;
+#endif
+#ifdef VK_NO_PROTOTYPES
+#define IMGUI_VULKAN_FUNC_MAP(IMGUI_VULKAN_FUNC_MAP_MACRO) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkAllocateCommandBuffers) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkAllocateDescriptorSets) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkAllocateMemory) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkBindBufferMemory) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkBindImageMemory) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCmdBindDescriptorSets) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCmdBindIndexBuffer) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCmdBindPipeline) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCmdBindVertexBuffers) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCmdCopyBufferToImage) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCmdDrawIndexed) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCmdPipelineBarrier) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCmdPushConstants) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCmdSetScissor) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCmdSetViewport) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateBuffer) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateCommandPool) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateDescriptorSetLayout) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateFence) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateFramebuffer) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateGraphicsPipelines) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateImage) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateImageView) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreatePipelineLayout) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateRenderPass) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateSampler) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateSemaphore) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateShaderModule) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkCreateSwapchainKHR) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyBuffer) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyCommandPool) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyDescriptorSetLayout) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyFence) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyFramebuffer) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyImage) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyImageView) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyPipeline) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyPipelineLayout) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyRenderPass) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroySampler) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroySemaphore) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroyShaderModule) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroySurfaceKHR) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDestroySwapchainKHR) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkDeviceWaitIdle) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkFlushMappedMemoryRanges) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkFreeCommandBuffers) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkFreeDescriptorSets) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkFreeMemory) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetBufferMemoryRequirements) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetImageMemoryRequirements) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetPhysicalDeviceMemoryProperties) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetPhysicalDeviceSurfaceCapabilitiesKHR) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetPhysicalDeviceSurfaceFormatsKHR) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetPhysicalDeviceSurfacePresentModesKHR) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkGetSwapchainImagesKHR) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkMapMemory) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkUnmapMemory) \
+    IMGUI_VULKAN_FUNC_MAP_MACRO(vkUpdateDescriptorSets)
+
+// Define function pointers
+#define IMGUI_VULKAN_FUNC_DEF(func) static PFN_##func func;
+IMGUI_VULKAN_FUNC_MAP(IMGUI_VULKAN_FUNC_DEF)
+#undef IMGUI_VULKAN_FUNC_DEF
+#endif // VK_NO_PROTOTYPES
 
 //-----------------------------------------------------------------------------
 // SHADERS
@@ -825,6 +911,13 @@ void ImGui_ImplVulkan_SetMinImageCount(uint32_t min_image_count)
     g_VulkanInitInfo.MinImageCount = min_image_count;
 }
 
+
+void ImGui_ImplVulkan_RemoveTexture(VkDescriptorSet descriptor_set)
+{
+    ImGui_ImplVulkan_Data* bd = ImGui_ImplVulkan_GetBackendData();
+    ImGui_ImplVulkan_InitInfo* v = &bd->VulkanInitInfo;
+    vkFreeDescriptorSets(v->Device, v->DescriptorPool, 1, &descriptor_set);
+}
 
 //-------------------------------------------------------------------------
 // Internal / Miscellaneous Vulkan Helpers
