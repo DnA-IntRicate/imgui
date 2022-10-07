@@ -1289,7 +1289,7 @@ void ImGui_ImplVulkanH_DestroyWindowRenderBuffers(VkDevice device, ImGui_ImplVul
     buffers->Count = 0;
 }
 
-ImTextureID ImGui_ImplVulkan_AddTexture(VkSampler sampler, VkImageView image_view, VkImageLayout image_layout){
+VkDescriptorSet ImGui_ImplVulkan_AddTexture(VkSampler sampler, VkImageView image_view, VkImageLayout image_layout){
     VkResult err;
 
     ImGui_ImplVulkan_InitInfo* v = &g_VulkanInitInfo;
@@ -1320,5 +1320,5 @@ ImTextureID ImGui_ImplVulkan_AddTexture(VkSampler sampler, VkImageView image_vie
         vkUpdateDescriptorSets(v->Device, 1, write_desc, 0, NULL);
     }
 
-    return (ImTextureID)descriptor_set;
+    return descriptor_set;
 }
