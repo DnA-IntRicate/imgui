@@ -23,6 +23,8 @@
 // CHANGELOG
 // (minor and older changes stripped away, please see git history for details)
 //  2025-XX-XX: Platform: Added support for multiple windows via the ImGuiPlatformIO interface.
+//  2025-12-03: Inputs: handle WM_IME_CHAR/WM_IME_COMPOSITION messages to support Unicode inputs on MBCS (non-Unicode) Windows. (#9099, #3653, #5961)
+//  2025-10-19: Inputs: Revert previous change to allow for io.ClearInputKeys() on focus-out not losing gamepad state.
 //  2025-09-23: Inputs: Minor optimization not submitting gamepad input if packet number has not changed.
 //  2025-09-18: Call platform_io.ClearPlatformHandlers() on shutdown.
 //  2025-06-02: [Docking] WM_DPICHANGED also apply io.ConfigDpiScaleViewports for main viewport instead of letting it be done by application code.
@@ -139,7 +141,6 @@ struct ImGui_ImplWin32_Data
     HMODULE                     XInputDLL;
     PFN_XInputGetCapabilities   XInputGetCapabilities;
     PFN_XInputGetState          XInputGetState;
-    DWORD                       XInputPacketNumber;
 #endif
 
     ImGui_ImplWin32_Data()      { memset((void*)this, 0, sizeof(*this)); }
@@ -189,6 +190,7 @@ static bool ImGui_ImplWin32_InitEx(void* hwnd, bool platform_has_own_dc)
     io.BackendFlags |= ImGuiBackendFlags_HasSetMousePos;          // We can honor io.WantSetMousePos requests (optional, rarely used)
     io.BackendFlags |= ImGuiBackendFlags_PlatformHasViewports;    // We can create multi-viewports on the Platform side (optional)
     io.BackendFlags |= ImGuiBackendFlags_HasMouseHoveredViewport; // We can call io.AddMouseViewportEvent() with correct data (optional)
+    io.BackendFlags |= ImGuiBackendFlags_HasParentViewport;       // We can honor viewport->ParentViewportId by applying the corresponding parent/child relationship at platform levle (optional)
 
     bd->hWnd = (HWND)hwnd;
     bd->TicksPerSecond = perf_frequency;
@@ -261,7 +263,7 @@ void    ImGui_ImplWin32_Shutdown()
 
     io.BackendPlatformName = nullptr;
     io.BackendPlatformUserData = nullptr;
-    io.BackendFlags &= ~(ImGuiBackendFlags_HasMouseCursors | ImGuiBackendFlags_HasSetMousePos | ImGuiBackendFlags_HasGamepad | ImGuiBackendFlags_PlatformHasViewports | ImGuiBackendFlags_HasMouseHoveredViewport);
+    io.BackendFlags &= ~(ImGuiBackendFlags_HasMouseCursors | ImGuiBackendFlags_HasSetMousePos | ImGuiBackendFlags_HasGamepad | ImGuiBackendFlags_PlatformHasViewports | ImGuiBackendFlags_HasMouseHoveredViewport | ImGuiBackendFlags_HasParentViewport);
     platform_io.ClearPlatformHandlers();
     IM_DELETE(bd);
 }
@@ -420,9 +422,6 @@ static void ImGui_ImplWin32_UpdateGamepads(ImGuiIO& io)
     if (!bd->HasGamepad || bd->XInputGetState == nullptr || bd->XInputGetState(0, &xinput_state) != ERROR_SUCCESS)
         return;
     io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
-    if (bd->XInputPacketNumber != 0 && bd->XInputPacketNumber == xinput_state.dwPacketNumber)
-        return;
-    bd->XInputPacketNumber = xinput_state.dwPacketNumber;
 
     #define IM_SATURATE(V)                      (V < 0.0f ? 0.0f : V > 1.0f ? 1.0f : V)
     #define MAP_BUTTON(KEY_NO, BUTTON_ENUM)     { io.AddKeyEvent(KEY_NO, (gamepad.wButtons & BUTTON_ENUM) != 0); }
@@ -891,8 +890,26 @@ IMGUI_IMPL_API LRESULT ImGui_ImplWin32_WndProcHandlerEx(HWND hwnd, UINT msg, WPA
         else
         {
             wchar_t wch = 0;
-            ::MultiByteToWideChar(bd->KeyboardCodePage, MB_PRECOMPOSED, (char*)&wParam, 1, &wch, 1);
+            ::MultiByteToWideChar(bd->KeyboardCodePage, MB_PRECOMPOSED, (char*)&wParam, 2, &wch, 1);
             io.AddInputCharacter(wch);
+        }
+        return 0;
+    case WM_IME_COMPOSITION:
+    {
+        // Handling WM_IME_COMPOSITION ensure that WM_IME_CHAR value is correct even for MBCS apps.
+        // (see #9099, #3653 and https://stackoverflow.com/questions/77450354 topics) 
+        LRESULT result = ::DefWindowProcW(hwnd, msg, wParam, lParam);
+        return (lParam & GCS_RESULTSTR) ? 1 : result;
+    }
+    case WM_IME_CHAR:
+        if (::IsWindowUnicode(hwnd) == FALSE)
+        {
+            if (::IsDBCSLeadByte(HIBYTE(wParam)))
+                wParam = (WPARAM)MAKEWORD(HIBYTE(wParam), LOBYTE(wParam));
+            wchar_t wch = 0;
+            ::MultiByteToWideChar(bd->KeyboardCodePage, MB_PRECOMPOSED, (char*)&wParam, 2, &wch, 1);
+            io.AddInputCharacterUTF16(wch);
+            return 1;
         }
         return 0;
     case WM_SETCURSOR:
@@ -1122,11 +1139,10 @@ static void ImGui_ImplWin32_GetWin32StyleFromViewportFlags(ImGuiViewportFlags fl
         *out_ex_style |= WS_EX_TOPMOST;
 }
 
-static HWND ImGui_ImplWin32_GetHwndFromViewportID(ImGuiID viewport_id)
+static HWND ImGui_ImplWin32_GetHwndFromViewport(ImGuiViewport* viewport)
 {
-    if (viewport_id != 0)
-        if (ImGuiViewport* viewport = ImGui::FindViewportByID(viewport_id))
-            return (HWND)viewport->PlatformHandle;
+    if (viewport != nullptr)
+        return (HWND)viewport->PlatformHandle;
     return nullptr;
 }
 
@@ -1137,7 +1153,7 @@ static void ImGui_ImplWin32_CreateWindow(ImGuiViewport* viewport)
 
     // Select style and parent window
     ImGui_ImplWin32_GetWin32StyleFromViewportFlags(viewport->Flags, &vd->DwStyle, &vd->DwExStyle);
-    vd->HwndParent = ImGui_ImplWin32_GetHwndFromViewportID(viewport->ParentViewportId);
+    vd->HwndParent = ImGui_ImplWin32_GetHwndFromViewport(viewport->ParentViewport);
 
     // Create window
     RECT rect = { (LONG)viewport->Pos.x, (LONG)viewport->Pos.y, (LONG)(viewport->Pos.x + viewport->Size.x), (LONG)(viewport->Pos.y + viewport->Size.y) };
@@ -1200,7 +1216,7 @@ static void ImGui_ImplWin32_UpdateWindow(ImGuiViewport* viewport)
 
     // Update Win32 parent if it changed _after_ creation
     // Unlike style settings derived from configuration flags, this is more likely to change for advanced apps that are manipulating ParentViewportID manually.
-    HWND new_parent = ImGui_ImplWin32_GetHwndFromViewportID(viewport->ParentViewportId);
+    HWND new_parent = ImGui_ImplWin32_GetHwndFromViewport(viewport->ParentViewport);
     if (new_parent != vd->HwndParent)
     {
         // Win32 windows can either have a "Parent" (for WS_CHILD window) or an "Owner" (which among other thing keeps window above its owner).
@@ -1375,7 +1391,7 @@ static LRESULT CALLBACK ImGui_ImplWin32_WndProcHandler_PlatformWindow(HWND hWnd,
     // Allow secondary viewport WndProc to be called regardless of current context
     ImGuiContext* ctx = (ImGuiContext*)::GetPropA(hWnd, "IMGUI_CONTEXT");
     if (ctx == NULL)
-        return DefWindowProc(hWnd, msg, wParam, lParam); // unlike ImGui_ImplWin32_WndProcHandler() we are called directly by Windows, we can't just return 0.
+        return ::DefWindowProcW(hWnd, msg, wParam, lParam); // unlike ImGui_ImplWin32_WndProcHandler() we are called directly by Windows, we can't just return 0.
 
     ImGuiIO& io = ImGui::GetIO(ctx);
     ImGuiPlatformIO& platform_io = ImGui::GetPlatformIO(ctx);
@@ -1410,7 +1426,7 @@ static LRESULT CALLBACK ImGui_ImplWin32_WndProcHandler_PlatformWindow(HWND hWnd,
         }
     }
     if (result == 0)
-        result = DefWindowProc(hWnd, msg, wParam, lParam);
+        result = ::DefWindowProcW(hWnd, msg, wParam, lParam);
     return result;
 }
 
